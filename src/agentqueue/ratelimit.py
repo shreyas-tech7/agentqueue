@@ -30,6 +30,7 @@ class Limits:
     tpm: int
     burst_requests: int
     burst_tokens: int
+    burst_day: int = 0  # 0 means rpd // 2
     breaker_failures: int = 5
     breaker_cooldown_s: float = 10.0
     url: str = ""
@@ -37,10 +38,11 @@ class Limits:
 
     def buckets(self) -> dict[str, tuple[float, float]]:
         """dim -> (capacity, refill per second)."""
-        br = min(self.burst_requests, self.rpm, self.rpd)
+        br = min(self.burst_requests, self.rpm)
+        bd = min(self.burst_day or max(1, self.rpd // 2), self.rpd)
         return {
             "rpm": (br, (self.rpm - br) / WINDOWS["rpm"]),
-            "rpd": (br, (self.rpd - br) / WINDOWS["rpd"]),
+            "rpd": (bd, (self.rpd - bd) / WINDOWS["rpd"]),
             "tpm": (self.burst_tokens, (self.tpm - self.burst_tokens) / WINDOWS["tpm"]),
         }
 
@@ -61,12 +63,17 @@ def parse_limits(data: dict) -> dict[str, Limits]:
             tpm=tpm,
             burst_requests=int(p.get("burst_requests", max(1, rpm // 10))),
             burst_tokens=int(p.get("burst_tokens", max(1, tpm // 10))),
+            burst_day=int(p.get("burst_day", max(1, rpd // 2))),
             breaker_failures=int(p.get("breaker_failures", 5)),
             breaker_cooldown_s=float(p.get("breaker_cooldown_s", 10.0)),
             url=str(p.get("url", "")),
             timeout_s=float(p.get("timeout_s", 10.0)),
         )
-        if not (0 < lim.burst_requests <= rpm and 0 < lim.burst_tokens <= tpm):
+        if not (
+            0 < lim.burst_requests <= rpm
+            and 0 < lim.burst_tokens <= tpm
+            and 0 < lim.burst_day <= rpd
+        ):
             raise ValueError(f"{name}: bursts must be above 0 and at most the limit")
         out[name] = lim
     return out
@@ -236,7 +243,7 @@ def audit_calls(calls: list[tuple[float, int]], lim: Limits, eps: float = 1e-9) 
     for dim, window in WINDOWS.items():
         limit = getattr(lim, dim)
         j, total = 0, 0
-        for i, (t, tok) in enumerate(calls):
+        for t, tok in calls:
             total += tok if dim == "tpm" else 1
             while calls[j][0] < t - window:
                 total -= calls[j][1] if dim == "tpm" else 1
