@@ -2,7 +2,7 @@
 
 ## v0.1.0-rc1 (2026-11-21)
 
-Release commit: RELEASE_SHA_PENDING
+Release commit: ab8aa98bf69ecda7356b430535650077755cb05a (the commit after it only writes this SHA into CHANGELOG.md, docs/HUMAN_STEPS.md and feature_list.json)
 
 First release candidate.
 

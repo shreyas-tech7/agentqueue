@@ -148,6 +148,6 @@
       ".venv/bin/python -m pytest -q tests/test_repo.py -k release",
       "git status --porcelain"
     ],
-    "passes": false
+    "passes": true
   }
 ]

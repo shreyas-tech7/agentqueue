@@ -2,7 +2,7 @@
 
 Steps that only Shreyas can do, in order. The build session could not do them: the proxy refuses pull requests, tags and repo settings from the build machine.
 
-Release commit: RELEASE_SHA_PENDING
+Release commit: ab8aa98bf69ecda7356b430535650077755cb05a
 Branch: `claude/build-agentqueue`
 
 1. Open a pull request from `claude/build-agentqueue` into `main` at https://github.com/shreyas-tech7/agentqueue/pulls. Read the diff. Merge with a merge commit, so the release commit stays in the history of `main`. (The coordinator session may already have done this.)
@@ -10,7 +10,7 @@ Branch: `claude/build-agentqueue`
 
    ```bash
    git fetch origin
-   git tag -a v0.1.0-rc1 RELEASE_SHA_PENDING -m "Release candidate 1"
+   git tag -a v0.1.0-rc1 ab8aa98bf69ecda7356b430535650077755cb05a -m "Release candidate 1"
    git push origin v0.1.0-rc1
    ```
 
