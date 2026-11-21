@@ -1,0 +1,20 @@
+{
+  "runs": 200,
+  "base_seed": 0,
+  "kills": 499,
+  "hung_workers": 0,
+  "runs_with_a_kill": 200,
+  "bad_end_states": 0,
+  "finished_step_reruns": 0,
+  "unfinished_step_reruns": 121,
+  "missing_effects": 0,
+  "redeliveries": 19,
+  "dead_jobs": 0,
+  "succeeded_jobs": 600,
+  "meta": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cores": 4,
+    "python": "3.13.18",
+    "date": "2026-11-21"
+  }
+}

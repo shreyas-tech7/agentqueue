@@ -1,0 +1,14 @@
+# Provider limits. agentqueue keeps one token bucket per limit in its SQLite file.
+# The numbers here are examples. Check your provider's limits page before you use them.
+
+[providers.fake]
+url = "http://127.0.0.1:8000"   # the fake provider, see `python -m agentqueue.fakeprovider`
+rpm = 30            # requests per minute
+rpd = 1000          # requests per day
+tpm = 6000          # tokens per minute
+burst_requests = 3  # requests that may go at once. Refill is (rpm - burst) / 60 per second
+burst_tokens = 600  # tokens that may go at once. A single call must fit in this
+burst_day = 500     # requests per day that may go at once
+breaker_failures = 5
+breaker_cooldown_s = 10
+timeout_s = 30

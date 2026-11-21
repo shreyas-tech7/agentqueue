@@ -1,0 +1,12 @@
+llm
+durable-execution
+job-queue
+sqlite
+rate-limiting
+outbox-pattern
+idempotency
+chaos-testing
+token-bucket
+circuit-breaker
+python
+ai-agents
