@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS outbox (
     state TEXT NOT NULL DEFAULT 'pending',
     attempts INTEGER NOT NULL DEFAULT 0,
     lease_until REAL NOT NULL DEFAULT 0,
+    owner_pid INTEGER,
     last_error TEXT,
     created_at REAL NOT NULL,
     sent_at REAL

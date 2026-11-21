@@ -20,7 +20,7 @@ from collections.abc import Callable
 from agentqueue import ratelimit, receiver
 from agentqueue.errors import JobError, PermanentError, TransientError, classify_status
 from agentqueue.ratelimit import Limits, RateWait
-from agentqueue.store import LostLease, Store
+from agentqueue.store import LostLease, Store, pid_alive
 
 REGISTRY: dict[str, Callable] = {}
 _NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -206,15 +206,20 @@ def dispatch_once(
     crash = crash or Crasher(None)
     now = store.clock.now()
     with store.tx() as c:
-        row = c.execute(
-            "SELECT * FROM outbox WHERE state = 'pending' AND lease_until <= ? ORDER BY id LIMIT 1",
-            (now,),
-        ).fetchone()
+        # Due entries, plus entries held by a dispatcher whose process is gone.
+        rows = c.execute(
+            "SELECT * FROM outbox WHERE state = 'pending' AND (lease_until <= ? OR owner_pid"
+            " IS NOT NULL) ORDER BY lease_until <= ? DESC, id LIMIT 50",
+            (now, now),
+        ).fetchall()
+        row = next(
+            (r for r in rows if r["lease_until"] <= now or not pid_alive(r["owner_pid"])), None
+        )
         if row is None:
             return False
         c.execute(
-            "UPDATE outbox SET lease_until = ?, attempts = attempts + 1 WHERE id = ?",
-            (now + lease_s, row["id"]),
+            "UPDATE outbox SET lease_until = ?, attempts = attempts + 1, owner_pid = ? WHERE id = ?",
+            (now + lease_s, os.getpid(), row["id"]),
         )
     try:
         receiver.send(row["target"], row["dedupe_key"], json.loads(row["payload"]))
@@ -222,14 +227,14 @@ def dispatch_once(
         delay = backoff(row["attempts"] + 1, rng, base=0.2, cap=10.0)
         with store.tx() as c:
             c.execute(
-                "UPDATE outbox SET last_error = ?, lease_until = ? WHERE id = ?",
+                "UPDATE outbox SET last_error = ?, lease_until = ?, owner_pid = NULL WHERE id = ?",
                 (f"{type(e).__name__}: {e}", store.clock.now() + delay, row["id"]),
             )
         return True
     crash.hit("dispatch_after_send")
     with store.tx() as c:
         c.execute(
-            "UPDATE outbox SET state = 'sent', sent_at = ? WHERE id = ?",
+            "UPDATE outbox SET state = 'sent', sent_at = ?, owner_pid = NULL WHERE id = ?",
             (store.clock.now(), row["id"]),
         )
     crash.hit("dispatch_after_mark")
