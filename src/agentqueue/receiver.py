@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from agentqueue.errors import TransientError, classify_status
+from agentqueue.errors import PermanentError, TransientError, classify_status
 
 _NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -62,13 +62,19 @@ class SqliteReceiver:
         return {"effects": n, "deliveries": d}
 
 
+_RECEIVERS: dict[str, SqliteReceiver] = {}
+
+
 def send(target: str, key: str, payload: object, timeout: float = 5.0) -> None:
-    """Deliver one entry. Raises a JobError on failure."""
+    """Deliver one entry. Raises a JobError on failure. PermanentError means do not retry."""
     if target.startswith("sqlite:"):
-        SqliteReceiver(target[len("sqlite:") :]).deliver(key, payload)
+        path = target[len("sqlite:") :]
+        if path not in _RECEIVERS:
+            _RECEIVERS[path] = SqliteReceiver(path)
+        _RECEIVERS[path].deliver(key, payload)
         return
-    if not target.startswith("http://"):
-        raise ValueError(f"unsupported target {target!r}")
+    if not target.startswith(("http://", "https://")):
+        raise PermanentError(f"unsupported target {target!r}")
     req = urllib.request.Request(
         target,
         data=json.dumps(payload).encode(),

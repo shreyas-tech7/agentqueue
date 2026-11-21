@@ -14,6 +14,7 @@ def test_200_kill_runs_keep_every_invariant():
     assert res["runs"] == 200
     assert res["runs_with_a_kill"] >= 150, "most runs must actually kill a worker"
     assert res["bad_end_states"] == 0, "every job ends as succeeded or dead"
+    assert res["hung_workers"] == 0, "no worker ran past its timeout"
     assert res["finished_step_reruns"] == 0, "no finished step runs twice"
     assert res["missing_effects"] == 0, "every succeeded job's side effect reached the receiver"
     assert res["succeeded_jobs"] + res["dead_jobs"] == 600

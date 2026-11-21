@@ -17,11 +17,14 @@ KILL = ROOT / "results" / "killtest.json"
 LEVEL_ORDER = ("low", "medium", "high")
 
 
-def _ci(m: dict, fmt: str = "{:.2f}", scale: float = 1.0) -> str:
+def _ci(m: dict, fmt: str = "{:.2f}", scale: float = 1.0, top: float | None = None) -> str:
+    """Mean and t interval. The interval is cut at 0, and at `top` when given, since a count
+    cannot go below 0 and a rate cannot go above 100%."""
     mean = fmt.format(m["mean"] * scale)
     if m["lo"] is None:
         return mean
-    lo, hi = fmt.format(m["lo"] * scale), fmt.format(m["hi"] * scale)
+    lo_v, hi_v = max(m["lo"], 0.0), m["hi"] if top is None else min(m["hi"], top)
+    lo, hi = fmt.format(lo_v * scale), fmt.format(hi_v * scale)
     if lo == hi == mean:
         return f"{mean} (same on every seed)"
     return f"{mean} [{lo}, {hi}]"
@@ -36,7 +39,7 @@ def results_rows(bench: dict) -> list[list[str]]:
         rows.append(
             [
                 lv,
-                _ci(s["completion_rate"], "{:.1f}%", 100),
+                _ci(s["completion_rate"], "{:.1f}%", 100, top=1.0),
                 _ci(s["wasted_calls"], "{:.1f}"),
                 _ci(s["duplicate_effects"], "{:.0f}"),
                 _ci(s["p50_latency_s"], "{:.1f} s"),
@@ -56,7 +59,7 @@ HEADERS = [
     "Duplicate effects",
     "p50 job latency",
     "p95 job latency",
-    "Requests per min",
+    "Requests per min, run average",
     "Limit breaks",
     "Worker kills per run",
 ]
@@ -136,6 +139,7 @@ def kill_line(kill: dict | None) -> str:
         f" {kill['runs_with_a_kill']} runs lost a worker to SIGKILL, {kill['kills']} kills in all."
         f" {kill['succeeded_jobs']} jobs succeeded and {kill['dead_jobs']} went dead."
         f" Jobs left in another state: {kill['bad_end_states']}."
+        f" Workers that hung: {kill.get('hung_workers', 0)}."
         f" Finished steps that ran again: {kill['finished_step_reruns']}."
         f" Unfinished steps that ran again after a kill: {kill['unfinished_step_reruns']}."
         f" Side effects missing at the receiver: {kill['missing_effects']}."

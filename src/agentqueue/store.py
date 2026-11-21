@@ -11,6 +11,7 @@ import json
 import os
 import secrets
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -88,6 +89,10 @@ CREATE TABLE IF NOT EXISTS buckets (
     updated REAL NOT NULL,
     PRIMARY KEY (provider, dim)
 );
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS providers (
     provider TEXT PRIMARY KEY,
     paused_until REAL NOT NULL DEFAULT 0,
@@ -121,7 +126,16 @@ class Job:
 def connect(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path), isolation_level=None, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    # Switching a new file to WAL can fail with "database is locked" when several processes
+    # open it at the same moment, and that pragma does not wait on the busy timeout. Retry.
+    for i in range(200):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or i == 199:
+                raise
+            time.sleep(0.01 + 0.001 * i)
     # NORMAL in WAL mode survives a process crash (SIGKILL). It can lose the last commits on
     # power loss. FULL would also cover power loss at the cost of an fsync per commit.
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -147,6 +161,11 @@ class Store:
         self.clock = clock or RealClock()
         self.conn = connect(path)
         self.conn.executescript(SCHEMA)
+        # A random id for this store, made once. It prefixes every dedupe key, so a second
+        # store (a reset database, another queue) never reuses a key a receiver has seen.
+        with self.tx() as c:
+            c.execute("INSERT OR IGNORE INTO meta VALUES ('store_id', ?)", (secrets.token_hex(8),))
+            self.store_id = c.execute("SELECT value FROM meta WHERE key = 'store_id'").fetchone()[0]
 
     def close(self) -> None:
         self.conn.close()
@@ -157,10 +176,11 @@ class Store:
         self.conn.execute("BEGIN IMMEDIATE")
         try:
             yield self.conn
+            self.conn.execute("COMMIT")
         except BaseException:
-            self.conn.execute("ROLLBACK")
+            if self.conn.in_transaction:
+                self.conn.execute("ROLLBACK")
             raise
-        self.conn.execute("COMMIT")
 
     # ---- submit -------------------------------------------------------------------------
     def submit(
@@ -321,7 +341,15 @@ class Store:
                 c.execute(
                     "INSERT INTO outbox (job_id, step_name, idx, dedupe_key, target, payload,"
                     " created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (job_id, name, idx, f"{job_id}:{name}:{idx}", target, json.dumps(body), now),
+                    (
+                        job_id,
+                        name,
+                        idx,
+                        f"{self.store_id}:{job_id}:{name}:{idx}",
+                        target,
+                        json.dumps(body),
+                        now,
+                    ),
                 )
 
     # ---- finishing ----------------------------------------------------------------------
@@ -364,6 +392,14 @@ class Store:
             )
             c.execute("DELETE FROM dead_letters WHERE job_id = ?", (job_id,))
         return True
+
+    def requeue_outbox(self) -> int:
+        """Move every dead outbox entry back to pending. Returns how many moved."""
+        with self.tx() as c:
+            return c.execute(
+                "UPDATE outbox SET state = 'pending', attempts = 0, lease_until = 0,"
+                " owner_pid = NULL WHERE state = 'dead'"
+            ).rowcount
 
     # ---- reads --------------------------------------------------------------------------
     def job(self, job_id: int) -> sqlite3.Row:

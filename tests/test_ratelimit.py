@@ -121,6 +121,33 @@ def test_parse_limits_from_toml(tmp_path):
     )
 
 
+def test_burst_equal_to_limit_is_rejected():
+    """Broken case: rpm = 1 gave burst 1, a refill rate of 0, and a provider starved for good."""
+    for p in ({"rpm": 1, "rpd": 100, "tpm": 100}, {"rpm": 10, "rpd": 1, "tpm": 100}):
+        with pytest.raises(ValueError, match="below the limit"):
+            ratelimit.parse_limits({"providers": {"x": p}})
+    got = ratelimit.parse_limits({"providers": {"x": {"rpm": 2, "rpd": 2, "tpm": 5}}})["x"]
+    assert (got.burst_requests, got.burst_day, got.burst_tokens) == (1, 1, 1)
+    assert all(rate > 0 for _, rate in got.buckets().values())
+
+
+def test_zero_refill_bucket_fails_instead_of_waiting_for_ever(tmp_path):
+    st = make_store(tmp_path)
+    lm = lim(rpm=5, burst_requests=5)
+    for _ in range(5):
+        acquire(st, lm, 1)
+    with pytest.raises(PermanentError, match="never refills"):
+        acquire(st, lm, 1)
+
+
+def test_retry_after_as_http_date():
+    from email.utils import formatdate
+
+    got = ratelimit.parse_duration(formatdate(__import__("time").time() + 30, usegmt=True))
+    assert got is not None and 25 < got <= 31
+    assert ratelimit.parse_duration("not a date") is None
+
+
 def test_bad_burst_is_rejected():
     with pytest.raises(ValueError):
         ratelimit.parse_limits(

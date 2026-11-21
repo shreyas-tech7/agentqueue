@@ -69,6 +69,8 @@ def status_text(st: Store, limits: dict) -> str:
     for s in ("queued", "waiting", "running", "succeeded", "failed", "dead"):
         lines.append(f"  {s:<10} {counts.get(s, 0)}")
     lines.append(f"  outbox pending {worker.outbox_pending(st)}")
+    dead_out = worker.outbox_dead(st)
+    lines.append(f"  outbox dead {len(dead_out)}")
     lines.append("rates (last 60 s, last 24 h):")
     provs = {r[0] for r in st.conn.execute("SELECT DISTINCT provider FROM calls")} | set(limits)
     for p in sorted(provs):
@@ -96,6 +98,10 @@ def status_text(st: Store, limits: dict) -> str:
         lines.append(
             f"  job {r['job_id']} [{r['state']}] {r['kind']} key={r['idem_key']}: {r['error']}"
         )
+    if dead_out:
+        lines.append(f"dead outbox entries: {len(dead_out)}")
+    for r in dead_out:
+        lines.append(f"  outbox {r['dedupe_key']} to {r['target']}: {r['last_error']}")
     return "\n".join(lines)
 
 
@@ -106,6 +112,9 @@ def cmd_status(a) -> int:
 
 def cmd_requeue(a) -> int:
     st = Store(a.db)
+    if a.outbox:
+        print(f"requeued {st.requeue_outbox()} outbox entries")
+        return 0
     ids = [r["job_id"] for r in st.dead_letters()] if a.all else a.job_ids
     done = [j for j in ids if st.requeue(j)]
     print(f"requeued {len(done)} jobs: {done}")
@@ -154,7 +163,7 @@ def cmd_killtest(a) -> int:
     if a.out:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)
         Path(a.out).write_text(json.dumps(keep, indent=2) + "\n")
-    ok = res["bad_end_states"] == 0 and res["finished_step_reruns"] == 0
+    ok = res["bad_end_states"] == 0 and res["finished_step_reruns"] == 0 and not res["hung_workers"]
     return 0 if ok and res["missing_effects"] == 0 else 1
 
 
@@ -196,9 +205,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = add("status", cmd_status, "queue depth, current rates, dead letters")
     s.add_argument("--limits")
 
-    r = add("requeue", cmd_requeue, "move dead or failed jobs back to the queue")
+    r = add("requeue", cmd_requeue, "move dead or failed jobs (or dead outbox entries) back")
     r.add_argument("job_ids", nargs="*", type=int)
     r.add_argument("--all", action="store_true")
+    r.add_argument("--outbox", action="store_true", help="resend dead outbox entries instead")
 
     b = add("bench", cmd_bench, "the chaos benchmark")
     b.add_argument("--levels", default="low,medium,high")

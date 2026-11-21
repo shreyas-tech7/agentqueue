@@ -104,7 +104,7 @@ def kill_run(seed: int, workdir: str | Path, jobs: int = 3, steps: int = 4) -> d
             f"kill-{seed}-{n}",
             max_attempts=12,
         )
-    kills = launches = 0
+    kills = launches = hangs = 0
     for launch in range(12):
         if st.all_terminal() and _pending(st) == 0:
             break
@@ -125,8 +125,12 @@ def kill_run(seed: int, workdir: str | Path, jobs: int = 3, steps: int = 4) -> d
         try:
             _, err = p.communicate(timeout=60)
         except subprocess.TimeoutExpired:
+            # A worker that never exits is a bug (for example an outbox entry that retries for
+            # ever). Count it apart, so the kill below is not mistaken for a planned kill.
             p.kill()
             _, err = p.communicate(timeout=10)
+            hangs += 1
+            continue
         if p.returncode == -signal.SIGKILL:
             kills += 1
         elif p.returncode != 0:
@@ -151,6 +155,7 @@ def kill_run(seed: int, workdir: str | Path, jobs: int = 3, steps: int = 4) -> d
         "seed": seed,
         "launches": launches,
         "kills": kills,
+        "hangs": hangs,
         "states": states,
         "ended_ok": set(states) <= {"succeeded", "dead"},
         "step_runs": execs[0],
@@ -179,6 +184,7 @@ def kill_suite(runs: int, base_seed: int = 0, threads: int = 4) -> dict:
         "runs": runs,
         "base_seed": base_seed,
         "kills": sum(r["kills"] for r in results),
+        "hung_workers": sum(r["hangs"] for r in results),
         "runs_with_a_kill": sum(r["kills"] > 0 for r in results),
         "bad_end_states": sum(not r["ended_ok"] for r in results),
         "finished_step_reruns": sum(r["finished_step_reruns"] for r in results),
@@ -444,7 +450,11 @@ def bench_suite(levels, seeds, n_jobs=60, naive_levels=(), progress=None) -> dic
             "workers": 4,
             "limits": BENCH_LIMITS,
             "levels": {
-                k: {"kill_every_s": v["kill_every_s"], **vars(v["faults"])}
+                k: {
+                    "kill_every_s": v["kill_every_s"],
+                    "crash_span": v["crash_span"],
+                    **vars(v["faults"]),
+                }
                 for k, v in LEVELS.items()
             },
             "seeds": list(seeds),

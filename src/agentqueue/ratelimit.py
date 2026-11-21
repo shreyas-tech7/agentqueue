@@ -13,8 +13,10 @@ up to twice the limit through one window, so agentqueue does not use it.
 from __future__ import annotations
 
 import re
+import time
 import tomllib
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from agentqueue.errors import PermanentError
@@ -52,6 +54,28 @@ def load_limits(path: str | Path) -> dict[str, Limits]:
     return parse_limits(data)
 
 
+def _default_burst(limit: int, share: int) -> int:
+    return max(1, min(limit // share, limit - 1))
+
+
+def check_limits(lim: Limits) -> None:
+    """Every burst must be above 0 and below its limit.
+
+    A burst equal to its limit leaves a refill rate of 0: after the first burst the bucket never
+    fills again and the provider is starved for good. So a limit of 1 cannot be expressed.
+    """
+    for dim, (limit, burst) in {
+        "rpm": (lim.rpm, lim.burst_requests),
+        "rpd": (lim.rpd, lim.burst_day or max(1, lim.rpd // 2)),
+        "tpm": (lim.tpm, lim.burst_tokens),
+    }.items():
+        if not 0 < burst < limit:
+            raise ValueError(
+                f"{lim.provider}: the {dim} burst must be above 0 and below the limit"
+                f" (got burst {burst}, limit {limit}). A limit must be at least 2."
+            )
+
+
 def parse_limits(data: dict) -> dict[str, Limits]:
     out = {}
     for name, p in data.get("providers", {}).items():
@@ -61,20 +85,15 @@ def parse_limits(data: dict) -> dict[str, Limits]:
             rpm=rpm,
             rpd=rpd,
             tpm=tpm,
-            burst_requests=int(p.get("burst_requests", max(1, rpm // 10))),
-            burst_tokens=int(p.get("burst_tokens", max(1, tpm // 10))),
-            burst_day=int(p.get("burst_day", max(1, rpd // 2))),
+            burst_requests=int(p.get("burst_requests", _default_burst(rpm, 10))),
+            burst_tokens=int(p.get("burst_tokens", _default_burst(tpm, 10))),
+            burst_day=int(p.get("burst_day", _default_burst(rpd, 2))),
             breaker_failures=int(p.get("breaker_failures", 5)),
             breaker_cooldown_s=float(p.get("breaker_cooldown_s", 10.0)),
             url=str(p.get("url", "")),
             timeout_s=float(p.get("timeout_s", 10.0)),
         )
-        if not (
-            0 < lim.burst_requests <= rpm
-            and 0 < lim.burst_tokens <= tpm
-            and 0 < lim.burst_day <= rpd
-        ):
-            raise ValueError(f"{name}: bursts must be above 0 and at most the limit")
+        check_limits(lim)
         out[name] = lim
     return out
 
@@ -86,6 +105,7 @@ class RateWait(Exception):
         super().__init__(f"{reason}: wait {wait:.2f}s")
         self.wait = max(wait, 0.0)
         self.reason = reason
+        self.charged = False  # True when this wait should use an attempt
 
 
 def _provider_row(c, provider: str):
@@ -134,7 +154,12 @@ def acquire(store, lim: Limits, tokens: int, job_id=None, step_name=None) -> int
             level = cap if row is None else min(cap, row["level"] + (now - row["updated"]) * rate)
             levels[dim] = level
             if level < need[dim]:
-                wait = max(wait, (need[dim] - level) / rate if rate > 0 else 3600.0)
+                if rate <= 0:
+                    raise PermanentError(
+                        f"{lim.provider}: the {dim} bucket never refills because its burst"
+                        " equals its limit. Set the burst below the limit."
+                    )
+                wait = max(wait, (need[dim] - level) / rate)
         if wait > 0:
             raise RateWait(wait, "rate budget")
         for dim, level in levels.items():
@@ -153,7 +178,7 @@ _DUR = re.compile(r"(\d+(?:\.\d+)?)(ms|s|m|h)")
 
 
 def parse_duration(value: str | None) -> float | None:
-    """Parse '2', '1.5', '6m0s', '250ms' into seconds. None if it cannot."""
+    """Parse '2', '1.5', '6m0s', '250ms' or an HTTP date into seconds. None if it cannot."""
     if value is None:
         return None
     value = value.strip()
@@ -163,7 +188,13 @@ def parse_duration(value: str | None) -> float | None:
         pass
     parts = _DUR.findall(value)
     if not parts or "".join(a + b for a, b in parts) != value:
-        return None
+        try:  # Retry-After may also be an HTTP date, such as "Wed, 21 Oct 2026 07:28:00 GMT"
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError):
+            return None
+        if when is None or when.tzinfo is None:
+            return None
+        return max(when.timestamp() - time.time(), 0.0)
     scale = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
     return sum(float(a) * scale[b] for a, b in parts)
 

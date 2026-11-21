@@ -33,7 +33,7 @@ sequenceDiagram
     P-->>W: reply, or 429 / 5xx / timeout
     W->>S: commit step result + outbox entries (one transaction)
     D->>S: take a pending outbox entry
-    D->>R: send with dedupe key job:step:index
+    D->>R: send with dedupe key store:job:step:index
     R-->>D: ok (a repeat key is ignored)
     D->>S: mark sent
 ```
@@ -43,7 +43,7 @@ sequenceDiagram
 3. The worker runs the job function from the top. Each `ctx.step(name, fn)` that already finished returns its saved result. The first unfinished step runs.
 4. A model call first takes a request and its tokens from the provider's buckets. If the budget is gone, the job waits and the worker moves on.
 5. The step result and its outbox entries commit in one transaction.
-6. The dispatcher sends each outbox entry and marks it sent. The receiver drops a key it has seen.
+6. The dispatcher sends each outbox entry and marks it sent. The receiver drops a key it has seen. An entry that hits a permanent error, or fails 20 times, moves to the outbox's dead list, and `requeue --outbox` sends it again.
 7. An error goes to a retry with backoff, or to the dead-letter table. `requeue` brings a dead job back, and it resumes after its last finished step.
 
 The job states form an explicit table in [src/agentqueue/states.py](src/agentqueue/states.py). Every state change goes through it.
@@ -52,7 +52,7 @@ The job states form an explicit table in [src/agentqueue/states.py](src/agentque
 
 {{META}}
 
-Each cell is the mean over the seeds, then a 95% t interval over the seeds in brackets. "Same on every seed" means every seed gave the same value, so the interval has no width. Duplicate effects count side effects that the receiver applied more than once. Limit breaks count every moment the request log broke a token bucket or a limit window, summed over all seeds.
+Each cell is the mean over the seeds, then a 95% t interval over the seeds in brackets, cut at 0 and at 100%. "Same on every seed" means every seed gave the same value, so the interval has no width. Duplicate effects count side effects that the receiver applied more than once. Limit breaks count every moment the request log broke a token bucket or a limit window, summed over all seeds. That audit is the check on the limit. The requests per minute column is the run's request count over its length, and a run shorter than a minute can average above the per-minute limit, because the bucket starts full: a full burst plus a minute's refill still fits inside the limit for any 60 second window.
 
 {{RESULTS_TABLE}}
 
@@ -62,9 +62,11 @@ The fault rates per model request and the worker kills:
 
 Workers die two ways. The benchmark parent SIGKILLs a random worker at random times. And each worker process gets a crash point picked by the seed: at that crash point it SIGKILLs itself. A crash point is any claim, step boundary, finish or outbox send, so these kills land in the narrow gaps that random timing rarely hits. Every killed worker is restarted.
 
-Why the outbox matters. The same benchmark, with the side effect sent straight from inside the step and with no dedupe key:
+The outbox against an inline send. The same benchmark, with the side effect sent straight from inside the step and with no dedupe key:
 
 {{NAIVE_TABLE}}
+
+The inline path's duplicates are rare here, because a duplicate needs a kill in the short gap between the send and the step commit, and the interval includes zero. So this table alone does not prove the outbox is needed. The kill test below aims crash points at that gap on purpose, and its receiver caught every redelivery by dedupe key.
 
 The kill test. {{KILL_LINE}}
 
@@ -120,13 +122,15 @@ agentqueue work --jobs mymodule --limits examples/limits.toml
 
 ## Limits
 
-- One machine only. Workers share one SQLite file. There is no network protocol between them.
+- One machine only. Workers share one SQLite file. There is no network protocol between them. A dead worker is spotted by its lease running out or by its process id being gone, and the process id check assumes every worker runs in the same process namespace. Do not point workers in separate containers at one file.
 - Job code must be deterministic between steps. Replay runs the job function again from the top. Code that reads the clock or a random number outside a step can take a different path on replay and ask for a step that does not match the saved one. Put anything that varies inside a step.
 - Side effects happen once only if the receiver checks the dedupe key. The dispatcher delivers at least once. No system can promise exactly once delivery to a receiver that cannot dedupe: the sender can always crash after the receiver acted and before it learned the result, and then it has to choose between sending again and maybe never sending.
 - `synchronous=NORMAL` in WAL mode survives a process crash. A power cut can lose the last few commits. Set `synchronous=FULL` in `store.connect` if that matters to you.
-- The token estimate for a call is the prompt length divided by four plus `max_tokens`. A real tokenizer would be more exact.
+- The token estimate for a call is the prompt length divided by four plus `max_tokens`. The tokens-per-minute guarantee holds for that estimate. Text in many non-English languages takes more tokens than the estimate, so set `tpm` lower for it.
+- Every burst must sit below its limit, so a limit of 1 per minute or per day cannot be expressed.
+- A step that already sent a model call and then runs out of budget waits in place, up to 120 seconds, so it does not lose the call it paid for. A longer wait ends the attempt.
 - The benchmark uses a fake provider. A real provider has other fault patterns, and its limits are not always the ones it documents.
-- Throughput stays below the configured limit in the benchmark, because faults, backoff and kills eat time. The runner never goes above the limit.
+- At the higher fault levels, throughput falls well below the configured limit, because faults, backoff and kills eat time. The request log audit found no window above the limit at any level.
 
 ## Glossary
 
@@ -134,7 +138,7 @@ agentqueue work --jobs mymodule --limits examples/limits.toml
 - **Replay:** running the job function again after a crash. Finished steps return their saved results.
 - **Idempotency key:** a name the caller picks for a job. The same key always means the same job.
 - **Outbox:** a table of side effects waiting to be sent. Entries commit with the step that made them.
-- **Dedupe key:** the name of one side effect, `job:step:index`. The receiver ignores a key it has seen.
+- **Dedupe key:** the name of one side effect, `store:job:step:index`. The store part is a random id made when the SQLite file is created, so a reset database never reuses a key. The receiver ignores a key it has seen.
 - **Token bucket:** a counter that refills at a steady rate up to a cap. Each request takes from it.
 - **Full jitter:** a retry wait picked at random between zero and an exponential cap.
 - **Circuit breaker:** a switch that stops calls to a provider after repeated failures, then lets one trial call through.

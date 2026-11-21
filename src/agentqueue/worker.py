@@ -18,9 +18,20 @@ import urllib.request
 from collections.abc import Callable
 
 from agentqueue import ratelimit, receiver
-from agentqueue.errors import JobError, PermanentError, TransientError, classify_status
+from agentqueue.errors import (
+    JobError,
+    PermanentError,
+    ServerError,
+    TransientError,
+    classify_status,
+)
 from agentqueue.ratelimit import Limits, RateWait
 from agentqueue.store import LostLease, Store, pid_alive
+
+# A rate wait inside a step that already sent a model call is waited out in place, up to this
+# many seconds, so the step does not throw away (and pay again for) the calls it already made.
+MAX_INLINE_WAIT_S = 120.0
+OUTBOX_MAX_ATTEMPTS = 20
 
 REGISTRY: dict[str, Callable] = {}
 _NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -110,8 +121,10 @@ class Context:
         if self._calls is None:
             raise RuntimeError("ctx.model must run inside ctx.step")
         lim = self.limits[provider]
+        if not lim.url.startswith(("http://", "https://")):
+            raise PermanentError(f"provider {provider!r} needs an http or https url")
         tokens = len(prompt) // 4 + 1 + max_tokens
-        call_id = ratelimit.acquire(self.store, lim, tokens, self.job.id, self._step)
+        call_id = self._acquire(lim, tokens)
         body = {
             "model": "fake-1",
             "messages": [{"role": "user", "content": prompt}],
@@ -125,7 +138,7 @@ class Context:
         )
         try:
             with _NO_PROXY.open(req, timeout=lim.timeout_s) as resp:
-                data = json.loads(resp.read())
+                raw = resp.read()
                 headers = dict(resp.headers.items())
         except urllib.error.HTTPError as e:
             headers = dict(e.headers.items()) if e.headers else {}
@@ -136,12 +149,41 @@ class Context:
             )
             ratelimit.report(self.store, lim, call_id, err.outcome, headers)
             raise err from None
-        except (TimeoutError, OSError, urllib.error.URLError, ValueError) as e:
+        except (TimeoutError, OSError, urllib.error.URLError) as e:
             ratelimit.report(self.store, lim, call_id, "timeout")
             raise TransientError(f"call failed: {type(e).__name__}: {e}") from None
+        try:
+            text = json.loads(raw)["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as e:
+            # The provider answered, but not with a chat reply. Count it as a server fault.
+            ratelimit.report(self.store, lim, call_id, "server_error", headers)
+            raise ServerError(f"bad reply: {type(e).__name__}: {e}") from None
         ratelimit.report(self.store, lim, call_id, "ok", headers)
         self._calls.append(call_id)
-        return data["choices"][0]["message"]["content"]
+        return text
+
+    def _acquire(self, lim: Limits, tokens: int) -> int:
+        """Take rate budget for one call, and renew the lease, since the call may take a while.
+
+        With no call sent yet in this step, a RateWait ends the attempt and the job waits in the
+        queue. Once a call went out, giving up would throw that call away and make the replay
+        send it again, which can loop for ever when one step needs more than one burst. So the
+        wait happens here, in place, up to MAX_INLINE_WAIT_S. A longer wait uses an attempt.
+        """
+        waited = 0.0
+        while True:
+            self.store.renew(self.job.id, self.job.lease_token, self.lease_s)
+            try:
+                return ratelimit.acquire(self.store, lim, tokens, self.job.id, self._step)
+            except RateWait as w:
+                if not self._calls:
+                    raise
+                if waited + w.wait > MAX_INLINE_WAIT_S:
+                    w.charged = True
+                    raise
+                self.store.renew(self.job.id, self.job.lease_token, self.lease_s + w.wait)
+                self.store.clock.sleep(w.wait + 0.001)
+                waited += w.wait + 0.001
 
 
 def _auth_header() -> dict[str, str]:
@@ -163,25 +205,39 @@ def run_once(
         return False
     crash.hit("after_claim")
     ctx = Context(store, jb, limits, crash, lease_s)
+    try:
+        _run(store, jb, ctx, rng, crash)
+    except LostLease:
+        pass  # another worker owns the job now. Its replay picks up our committed steps.
+    return True
+
+
+def _run(store: Store, jb, ctx: Context, rng: random.Random, crash: Crasher) -> None:
     now = store.clock.now
     try:
         fn = REGISTRY.get(jb.kind)
         if fn is None:
             raise PermanentError(f"no job function for kind {jb.kind!r}")
         result = fn(ctx, jb.payload)
+        try:
+            json.dumps(result)
+        except (TypeError, ValueError) as e:
+            raise PermanentError(f"the job result is not JSON: {e}") from None
         crash.hit("before_finish")
         store.finish(jb.id, jb.lease_token, "succeed", result=result)
     except LostLease:
-        pass  # another worker owns the job now. Its replay picks up our committed steps.
+        raise
     except RateWait as w:
-        store.finish(jb.id, jb.lease_token, "rate_wait", error=str(w), run_after=now() + w.wait)
+        if getattr(w, "charged", False):  # a long wait after calls went out uses an attempt
+            _fail(store, jb, TransientError(str(w), retry_after=w.wait), rng, now)
+        else:
+            store.finish(jb.id, jb.lease_token, "rate_wait", error=str(w), run_after=now() + w.wait)
     except JobError as e:
         _fail(store, jb, e, rng, now)
     except DuplicateStep as e:
         store.finish(jb.id, jb.lease_token, "fail", error=f"duplicate step name {e}")
     except Exception as e:  # a bug or a local error: retry, the attempt limit stops a loop
         _fail(store, jb, TransientError(f"{type(e).__name__}: {e}"), rng, now)
-    return True
 
 
 def _fail(store, jb, err: JobError, rng, now) -> None:
@@ -224,11 +280,19 @@ def dispatch_once(
     try:
         receiver.send(row["target"], row["dedupe_key"], json.loads(row["payload"]))
     except Exception as e:
-        delay = backoff(row["attempts"] + 1, rng, base=0.2, cap=10.0)
+        attempts = row["attempts"] + 1
+        give_up = isinstance(e, PermanentError) or attempts >= OUTBOX_MAX_ATTEMPTS
+        delay = backoff(attempts, rng, base=0.2, cap=10.0)
         with store.tx() as c:
             c.execute(
-                "UPDATE outbox SET last_error = ?, lease_until = ?, owner_pid = NULL WHERE id = ?",
-                (f"{type(e).__name__}: {e}", store.clock.now() + delay, row["id"]),
+                "UPDATE outbox SET last_error = ?, lease_until = ?, owner_pid = NULL, state = ?"
+                " WHERE id = ?",
+                (
+                    f"{type(e).__name__}: {e}",
+                    store.clock.now() + delay,
+                    "dead" if give_up else "pending",
+                    row["id"],
+                ),
             )
         return True
     crash.hit("dispatch_after_send")
@@ -243,6 +307,14 @@ def dispatch_once(
 
 def outbox_pending(store: Store) -> int:
     return store.conn.execute("SELECT COUNT(*) FROM outbox WHERE state = 'pending'").fetchone()[0]
+
+
+def outbox_dead(store: Store) -> list:
+    """Outbox entries the dispatcher gave up on: a permanent error or too many attempts."""
+    return store.conn.execute(
+        "SELECT id, job_id, dedupe_key, target, attempts, last_error FROM outbox"
+        " WHERE state = 'dead' ORDER BY id"
+    ).fetchall()
 
 
 def work(

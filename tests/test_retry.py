@@ -144,3 +144,82 @@ def test_429_does_not_trip_the_breaker(tmp_path):
         ratelimit.report(st, lm, ratelimit.acquire(st, lm, 1), "rate_limited")
     row = st.conn.execute("SELECT breaker FROM providers").fetchone()
     assert row["breaker"] == "closed"
+
+
+@worker.job("t_two_calls")
+def t_two_calls(ctx, payload):
+    return ctx.step("both", lambda: [ctx.model("one"), ctx.model("two")])
+
+
+def test_step_with_two_calls_and_burst_of_one_finishes(tmp_path):
+    """Broken case: a rate wait threw the step away, the replay re-sent call 1, for ever."""
+    from agentqueue.fakeprovider import FakeProvider
+
+    with FakeProvider() as fp:
+        st = make_store(tmp_path)
+        lim = limits(fp.url, rpm=10, burst_requests=1)
+        jid, _ = st.submit("t_two_calls", {}, "k", max_attempts=2)
+        for _ in range(10):
+            worker.run_once(st, lim, rng())
+            if st.job(jid)["state"] == "succeeded":
+                break
+            st.clock.advance(10)
+        assert st.job(jid)["state"] == "succeeded"
+        assert fp.snapshot()["requests"] == 2  # each call went out once
+
+
+def test_lost_lease_during_finish_does_not_kill_the_worker(tmp_path):
+    """Broken case: finish() raised LostLease out of run_once and the worker process died."""
+    ERRS["kind"] = TransientError("t")
+    st = make_store(tmp_path)
+    jid, _ = st.submit("t_slow", {}, "k")
+
+    @worker.job("t_slow")
+    def t_slow(ctx, payload):
+        st.clock.advance(100)  # the lease runs out while the job runs
+        other = st.claim(lease_s=30)  # another worker takes over
+        assert other is not None
+        raise TransientError("late")
+
+    assert worker.run_once(st, {}, rng(), lease_s=1) is True
+    assert st.job(jid)["state"] == "running"  # still owned by the other worker
+
+
+def test_bad_reply_is_a_server_error(tmp_path):
+    import http.server
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            body = b"not json"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        st = make_store(tmp_path)
+        jid, _ = st.submit("t_two_calls", {}, "k")
+        worker.run_once(st, limits(f"http://127.0.0.1:{srv.server_address[1]}"), rng())
+        row = st.job(jid)
+        assert row["state"] == "waiting" and "bad reply" in row["last_error"]
+    finally:
+        srv.shutdown()
+
+
+@worker.job("t_not_json")
+def t_not_json(ctx, payload):
+    return {1, 2}
+
+
+def test_non_json_result_fails_permanently(tmp_path):
+    st = make_store(tmp_path)
+    jid, _ = st.submit("t_not_json", {}, "k")
+    worker.run_once(st, {}, rng())
+    assert st.job(jid)["state"] == "failed"
