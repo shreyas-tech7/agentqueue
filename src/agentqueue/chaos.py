@@ -110,8 +110,13 @@ def kill_run(seed: int, workdir: str | Path, jobs: int = 3, steps: int = 4) -> d
             break
         launches += 1
         last = launch == 11
-        mode = "clean" if last else rng.choice(["self", "self", "self", "external"])
-        crash_at = rng.randint(1, 3 * jobs * (steps + 2)) if mode == "self" else None
+        if launch == 0:
+            # The first worker always dies. A fresh queue passes far more than 4 * jobs crash
+            # points (a claim and three points per step for every job), so this always hits.
+            mode, crash_at = "self", rng.randint(1, 4 * jobs)
+        else:
+            mode = "clean" if last else rng.choice(["self", "self", "self", "external"])
+            crash_at = rng.randint(1, 3 * jobs * (steps + 2)) if mode == "self" else None
         p = subprocess.Popen(
             _worker_cmd(db, ["--lease", "2", "--seed", str(seed)]),
             env=_env(crash_at),

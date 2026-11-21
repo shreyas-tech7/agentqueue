@@ -1,14 +1,14 @@
 {
   "runs": 200,
   "base_seed": 0,
-  "kills": 311,
+  "kills": 499,
   "hung_workers": 0,
-  "runs_with_a_kill": 169,
+  "runs_with_a_kill": 200,
   "bad_end_states": 0,
   "finished_step_reruns": 0,
-  "unfinished_step_reruns": 53,
+  "unfinished_step_reruns": 121,
   "missing_effects": 0,
-  "redeliveries": 16,
+  "redeliveries": 19,
   "dead_jobs": 0,
   "succeeded_jobs": 600,
   "meta": {

@@ -50,6 +50,7 @@ class Stats:
     deliveries: dict[str, int] = field(default_factory=dict)
     effects: dict[str, object] = field(default_factory=dict)
     naive_effects: int = 0  # deliveries that carried no dedupe key: each one is an effect
+    logical: dict[str, int] = field(default_factory=dict)  # effect body -> keys that applied it
 
     def as_dict(self) -> dict:
         return {
@@ -59,7 +60,9 @@ class Stats:
             "deliveries": sum(self.deliveries.values()),
             "redeliveries": sum(n - 1 for n in self.deliveries.values()),
             "effects": len(self.effects),
-            "duplicate_effects": 0,  # by construction of the dedupe check, see effect_counts
+            # The same effect body applied under two different keys: a real duplicate that the
+            # key check cannot catch. Measured, not assumed.
+            "duplicate_effects": sum(n - 1 for n in self.logical.values()),
             "naive_effects": self.naive_effects,
         }
 
@@ -180,7 +183,10 @@ class FakeProvider:
         with self.lock:
             if key:
                 self.stats.deliveries[key] = self.stats.deliveries.get(key, 0) + 1
-                self.stats.effects.setdefault(key, data)
+                if key not in self.stats.effects:  # a new key: the receiver applies the effect
+                    self.stats.effects[key] = data
+                    tag = json.dumps(data, sort_keys=True)
+                    self.stats.logical[tag] = self.stats.logical.get(tag, 0) + 1
             else:
                 self.stats.naive_effects += 1
                 tag = json.dumps(data, sort_keys=True)

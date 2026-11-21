@@ -2,17 +2,18 @@
 
 ## Done
 - Initializer, memory files, CI, secret scan hook.
-- Store, clock, state machine, durable steps, idempotency, outbox and dispatcher, token buckets, retries, breaker, dead letters, fake provider, CLI.
-- Kill test: 200 SIGKILL runs in tests/test_kill.py.
-- Chaos benchmark with a no-outbox baseline. README generator and results page.
-- Docs: PLAN, WALKTHROUGH, INTERVIEW_QA, TOOLING, ENVIRONMENT, HUMAN_STEPS, COWORK_PROMPT.
+- Store, clock, state machine, durable steps, idempotency, outbox and dispatcher with a dead list, token buckets, retries, breaker, dead letters, fake provider, CLI.
+- Kill test: 200 SIGKILL runs in tests/test_kill.py, a kill in every run.
+- Chaos benchmark with a no-outbox baseline, run on the final code. README and results page generated from results/.
+- Code review and outside check, every must-fix item fixed with a test. See docs/RELEASE_CHECK.md.
+- Docs: PLAN, WALKTHROUGH, INTERVIEW_QA, TOOLING, ENVIRONMENT, DEMO, RELEASE_CHECK, HUMAN_STEPS, COWORK_PROMPT.
+- Release commit and the commit that writes its SHA.
 
 ## Next
-- Finish the benchmark run into results/bench.json, run killtest into results/killtest.json, run `agentqueue readme`.
-- Release check (docs/RELEASE_CHECK.md), outside check, release commit, bundle, report.
+- Human steps in docs/HUMAN_STEPS.md: PR, merge, tag v0.1.0-rc1, About box, topics, public repo when ready.
 
 ## Open blockers
 See BLOCKERS.md: no gh, PR or tags from this machine, no provider key.
 
 ## Last ./init.sh
-Not yet run on the full suite with the final results.
+2026-11-21: all checks pass once the release SHA is written.

@@ -12,7 +12,7 @@ from agentqueue.worker import Context, Crasher
 def test_200_kill_runs_keep_every_invariant():
     res = chaos.kill_suite(200, base_seed=0)
     assert res["runs"] == 200
-    assert res["runs_with_a_kill"] >= 150, "most runs must actually kill a worker"
+    assert res["runs_with_a_kill"] == 200, "every run kills at least one worker"
     assert res["bad_end_states"] == 0, "every job ends as succeeded or dead"
     assert res["hung_workers"] == 0, "no worker ran past its timeout"
     assert res["finished_step_reruns"] == 0, "no finished step runs twice"

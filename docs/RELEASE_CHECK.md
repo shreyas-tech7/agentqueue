@@ -43,8 +43,19 @@ Not installed (see DECISIONS.md). Its rules were applied by hand to README.md an
 
 ## 5. Outside check
 
-See below.
+A second fresh subagent cloned the repo to /tmp/outside-check, ran `./init.sh` there, checked each Done-means item with its own commands and edited nothing. It also ran the tests in a network namespace with only loopback, and they passed. It passed items 2 to 7 and failed item 1 only on the release SHA, which the release commit fills in. What it raised, and what was done:
+
+| Finding | Done |
+| --- | --- |
+| The outbox's "0 duplicate effects" was a constant in the fake receiver, not a measurement | Fixed. The receiver now counts the same effect body applied under two different keys. Test `test_duplicate_effects_are_measured`. The benchmark was run again |
+| Only 169 of the 200 kill runs actually killed a worker | Fixed. The first worker in every run now dies at a crash point that is sure to be reached. The test asks for a kill in all 200 runs |
+| The rate audit checks the scheduler's own log, and the minute and day windows never fill in the benchmark | Written plainly in INTERVIEW_QA.md question 11 |
+| Job latency is mostly queue wait, since all jobs are submitted at once | Written under the README results table |
+| Requests per minute above 900 at the low level reads like a limit break | Explained under the README results table |
+| One high-level run left a job dead, and the README did not say why | Explained under the README results table |
+| The inline baseline barely differs from the outbox | Already said plainly in the README. Not changed |
+| The tool results in this file could not be checked from the clone | Not changed. They were run in the build session as listed in section 3 |
 
 ## 6. Final state
 
-See below.
+After these fixes the benchmark (all levels, seeds 1 to 5, both baselines) and the 200-run kill test were run again on the final code, then `agentqueue readme`. `./init.sh` passed every test except `test_release_docs`, which needs the release SHA, and the release commit is followed by one commit that writes it. Every `passes` flag in feature_list.json was set from a passing check.

@@ -12,3 +12,8 @@ Bug triage (frequency x severity, fixed when 5 or more):
 - Live bug, fixed: a half-open breaker whose trial worker died stayed half open forever (2 x 5 = 10). A new trial now starts after the cooldown. Test: `test_lost_trial_does_not_stick_half_open`.
 - Live bug, fixed: the first day bucket shape gave a day burst equal to the minute burst, so a 1000 per day limit allowed about 41 requests an hour (3 x 3 = 9). The day burst is now its own setting with default rpd / 2.
 - Test gap, open (1 x 2 = 2): replay does not check that the step names on replay match the saved order. Code that changes its step names between runs gets new steps, not an error. The README limits section tells users to keep job code deterministic.
+- Live bug, fixed (review): a step with two model calls and a burst of one looped for ever and re-sent call 1 each loop (3 x 5 = 15). Test: `test_step_with_two_calls_and_burst_of_one_finishes`.
+- Live bug, fixed (review): a burst equal to its limit starved the provider for good (2 x 5 = 10). Bursts must be below the limit.
+- Live bug, fixed (review): `LostLease` from `finish` killed the worker process (2 x 3 = 6).
+- Live bug, fixed (review): an outbox entry with a bad target retried for ever and `work --until-empty` never ended (2 x 4 = 8). Dead list added.
+- Flake, fixed: six processes opening a new SQLite file at once could get "database is locked" from the WAL pragma (2 x 3 = 6). `store.connect` retries it.

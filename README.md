@@ -52,13 +52,13 @@ The job states form an explicit table in [src/agentqueue/states.py](src/agentque
 
 Run on 2026-11-21 on Intel(R) Xeon(R) Processor @ 2.10GHz, 4 cores, Python 3.13.18. Model: none: the local fake provider, no real model. Seeds: 1, 2, 3, 4, 5. Each run: 60 jobs, 3 model steps and 1 side effect per job, 4 worker processes, limits 900 requests per minute and 60000 tokens per minute.
 
-Each cell is the mean over the seeds, then a 95% t interval over the seeds in brackets, cut at 0 and at 100%. "Same on every seed" means every seed gave the same value, so the interval has no width. Duplicate effects count side effects that the receiver applied more than once. Limit breaks count every moment the request log broke a token bucket or a limit window, summed over all seeds. That audit is the check on the limit. The requests per minute column is the run's request count over its length, and a run shorter than a minute can average above the per-minute limit, because the bucket starts full: a full burst plus a minute's refill still fits inside the limit for any 60 second window.
+Each cell is the mean over the seeds, then a 95% t interval over the seeds in brackets, cut at 0 and at 100%. "Same on every seed" means every seed gave the same value, so the interval has no width. Duplicate effects count side effects the receiver applied twice: the same effect body under two different keys, which a key check cannot catch. Job latency runs from submit to finish, and all jobs are submitted at once at the start, so most of it is time spent in the queue behind the rate limit. Completion below 100% means a job used all its attempts under faults and kills and went dead, which is the designed end for that case. Limit breaks count every moment the request log broke a token bucket or a limit window, summed over all seeds. That audit is the check on the limit. The requests per minute column is the run's request count over its length, and a run shorter than a minute can average above the per-minute limit, because the bucket starts full: a full burst plus a minute's refill still fits inside the limit for any 60 second window.
 
 | Fault level | Completion rate | Wasted calls per run | Duplicate effects | p50 job latency | p95 job latency | Requests per min, run average | Limit breaks | Worker kills per run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| low | 100.0% (same on every seed) | 2.6 [0.0, 5.2] | 0 (same on every seed) | 9.1 s [8.7 s, 9.5 s] | 12.0 s [11.8 s, 12.2 s] | 959 [957, 960] | 0 | 9.2 [6.2, 12.2] |
-| medium | 100.0% (same on every seed) | 3.8 [1.8, 5.8] | 0 (same on every seed) | 9.7 s [9.3 s, 10.1 s] | 13.2 s [12.6 s, 13.8 s] | 849 [724, 974] | 0 | 32.6 [28.2, 37.0] |
-| high | 99.7% [98.7%, 100.0%] | 15.4 [9.5, 21.3] | 0 (same on every seed) | 12.0 s [11.2 s, 12.8 s] | 21.4 s [15.5 s, 27.4 s] | 334 [240, 427] | 0 | 123.8 [113.2, 134.4] |
+| low | 100.0% (same on every seed) | 3.0 [0.7, 5.3] | 0 (same on every seed) | 9.2 s [8.6 s, 9.7 s] | 12.0 s [11.8 s, 12.3 s] | 956 [947, 964] | 0 | 10.2 [6.5, 13.9] |
+| medium | 100.0% (same on every seed) | 3.6 [1.5, 5.7] | 0 (same on every seed) | 9.8 s [9.5 s, 10.2 s] | 13.3 s [12.6 s, 14.0 s] | 870 [781, 958] | 0 | 32.6 [29.0, 36.2] |
+| high | 99.7% [98.7%, 100.0%] | 15.8 [9.3, 22.3] | 0 (same on every seed) | 12.0 s [11.4 s, 12.6 s] | 20.1 s [19.1 s, 21.1 s] | 279 [220, 338] | 0 | 134.8 [122.7, 146.9] |
 
 The fault rates per model request and the worker kills:
 
@@ -81,7 +81,7 @@ The outbox against an inline send. The same benchmark, with the side effect sent
 
 The inline path's duplicates are rare here, because a duplicate needs a kill in the short gap between the send and the step commit, and the interval includes zero. So this table alone does not prove the outbox is needed. The kill test below aims crash points at that gap on purpose, and its receiver caught every redelivery by dedupe key.
 
-The kill test. `agentqueue killtest` ran 200 runs on 2026-11-21 (seeds 0 to 199). 169 runs lost a worker to SIGKILL, 311 kills in all. 600 jobs succeeded and 0 went dead. Jobs left in another state: 0. Workers that hung: 0. Finished steps that ran again: 0. Unfinished steps that ran again after a kill: 53. Side effects missing at the receiver: 0. Redeliveries the receiver caught by dedupe key: 16.
+The kill test. `agentqueue killtest` ran 200 runs on 2026-11-21 (seeds 0 to 199). 200 runs lost a worker to SIGKILL, 499 kills in all. 600 jobs succeeded and 0 went dead. Jobs left in another state: 0. Workers that hung: 0. Finished steps that ran again: 0. Unfinished steps that ran again after a kill: 121. Side effects missing at the receiver: 0. Redeliveries the receiver caught by dedupe key: 19.
 
 Source files: [results/bench.json](results/bench.json) and [results/killtest.json](results/killtest.json). A static page with the same tables opens from disk: [docs/index.html](docs/index.html). These numbers measure how the runner reacts to faults that a fake provider injects. They say nothing about any real model or provider.
 
@@ -91,9 +91,9 @@ No money was spent. Every call went to the local fake provider. The table shows 
 
 | Fault level | Model calls a job needs | Requests sent per finished job | Wasted calls per finished job |
 | --- | --- | --- | --- |
-| low | 3 | 3.23 | 0.04 |
-| medium | 3 | 3.52 | 0.06 |
-| high | 3 | 4.31 | 0.26 |
+| low | 3 | 3.24 | 0.05 |
+| medium | 3 | 3.51 | 0.06 |
+| high | 3 | 4.32 | 0.26 |
 
 Wasted calls are replies the provider produced that the runner then lost: the worker died before it saved them, or the client had already timed out. On a paid provider each one is billed and thrown away.
 

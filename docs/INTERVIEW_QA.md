@@ -33,7 +33,7 @@ One machine, one file, no server to run. WAL mode lets readers keep reading whil
 It keeps jobs that ran out of attempts (`dead`) or hit a permanent error (`failed`), with the last error. `agentqueue status` lists them. `agentqueue requeue` sends them back with fresh attempts, and they resume after their last finished step.
 
 **11. How do you know the scheduler never breaks a limit?**
-Each request is written to the `calls` table in the same transaction that takes its tokens. `ratelimit.audit_calls` replays that log through every bucket and also counts every sliding window. The benchmark audits every run. `results/bench.json` has `limit_violations` per run.
+Each request is written to the `calls` table in the same transaction that takes its tokens. `ratelimit.audit_calls` replays that log through every bucket and also counts every sliding window. The benchmark audits every run, and `results/bench.json` has `limit_violations` per run. Be clear about what this proves: it checks the scheduler's own reservation log, not the moment each request reached the provider. And a benchmark run sends a few hundred requests, so the minute and day windows are never close to full. The bucket audit, which the start-up burst does push to its edge, is the part that tests something.
 
 **12. What does the chaos benchmark measure?**
 `chaos.bench_run` starts the fake provider with fault rates, four worker processes, a parent that SIGKILLs a random worker on a random schedule, and a seeded crash point in every worker process. It reports completion rate, wasted calls, duplicate effects at the receiver, p50 and p95 job latency and requests per minute. `bench_suite` runs three fault levels by five seeds. The README table comes from `results/bench.json`.
@@ -55,3 +55,7 @@ When workers run on more than one machine, when workflows last weeks and their c
 
 **18. How do you keep tests fast and stable with real time in the code?**
 Everything reads time from an injected clock. Unit tests use `FakeClock` and move time by hand. Only the kill test and the benchmark use real processes and real time, and every subprocess has a timeout.
+
+**19. What did the code review catch?**
+
+A step that makes two model calls, with a burst of one, looped for ever. Call 1 took the only request, call 2 hit a rate wait, and the old code threw the whole step away, so the replay sent call 1 again. `worker.Context._acquire` now waits in place once a call in the step has gone out, renewing the lease, and `tests/test_retry.py::test_step_with_two_calls_and_burst_of_one_finishes` checks that each call goes out once. The review also found a burst equal to its limit (refill rate 0), a lease loss that killed the worker, and an outbox that could retry for ever. docs/RELEASE_CHECK.md lists every finding.

@@ -127,3 +127,30 @@ def test_summarize_and_classify_examples(tmp_path):
             ("summarize-1", "ok"),
             ("ask", "ok"),
         }
+
+
+def test_duplicate_effects_are_measured(tmp_path):
+    """Broken case: the outbox duplicate count was a constant 0. The same body under a second key
+    is a duplicate the key check cannot catch, and it must show up."""
+    import json
+    import urllib.request
+
+    from agentqueue.receiver import _NO_PROXY
+
+    with FakeProvider() as fp:
+
+        def post(key, body):
+            req = urllib.request.Request(
+                fp.url + "/receive",
+                data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json", "Idempotency-Key": key},
+                method="POST",
+            )
+            _NO_PROXY.open(req, timeout=5).read()
+
+        post("a", {"job": 1})
+        post("a", {"job": 1})  # a redelivery, caught by the key
+        assert fp.snapshot()["duplicate_effects"] == 0
+        post("b", {"job": 1})  # the same effect under a new key
+        snap = fp.snapshot()
+        assert snap["duplicate_effects"] == 1 and snap["redeliveries"] == 1
