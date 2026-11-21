@@ -1,0 +1,35 @@
+name: Chaos benchmark (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      levels:
+        description: "Fault levels"
+        default: "low,medium,high"
+      seeds:
+        description: "Seeds, for example 1-5"
+        default: "1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - run: ./init.sh
+      - run: .venv/bin/agentqueue bench --levels "$LEVELS" --seeds "$SEEDS" --out /tmp/bench.json
+        env:
+          LEVELS: ${{ inputs.levels }}
+          SEEDS: ${{ inputs.seeds }}
+      - run: .venv/bin/agentqueue killtest --runs 200 --out /tmp/killtest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: /tmp/*.json

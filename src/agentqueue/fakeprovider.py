@@ -73,7 +73,7 @@ def fake_reply(prompt: str, max_tokens: int) -> tuple[str, int]:
 
 
 class FakeProvider:
-    def __init__(self, faults: Faults | None = None, seed: int = 0):
+    def __init__(self, faults: Faults | None = None, seed: int = 0, port: int = 0):
         self.faults = faults or Faults()
         self.rng = random.Random(seed)
         self.lock = threading.Lock()
@@ -117,7 +117,7 @@ class FakeProvider:
                 else:
                     self._json(404, {"error": "not found"})
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
@@ -192,3 +192,31 @@ class FakeProvider:
             out = self.stats.as_dict()
             out["naive_duplicates"] = sum(n - 1 for n in self.naive_keys.values())
             return out
+
+
+def main(argv=None) -> int:
+    """Serve the fake provider on 127.0.0.1 until Ctrl-C. For trying agentqueue by hand."""
+    import argparse
+
+    p = argparse.ArgumentParser(prog="python -m agentqueue.fakeprovider")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--seed", type=int, default=0)
+    for name in ("429", "500", "timeout", "slow", "drop"):
+        p.add_argument(f"--rate-{name}", type=float, default=0.0)
+    a = p.parse_args(argv)
+    faults = Faults(
+        **{f"rate_{n}": getattr(a, f"rate_{n}") for n in ("429", "500", "timeout", "slow", "drop")}
+    )
+    fp = FakeProvider(faults, seed=a.seed, port=a.port)
+    print(f"fake provider on {fp.url}  (model: POST /v1/chat/completions, receiver: POST /receive)")
+    try:
+        fp.server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        fp.server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

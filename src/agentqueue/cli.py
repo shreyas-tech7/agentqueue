@@ -204,7 +204,9 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--levels", default="low,medium,high")
     b.add_argument("--seeds", default="1-5")
     b.add_argument("--jobs", type=int, default=60)
-    b.add_argument("--naive", default="medium", help="levels to also run the no-outbox baseline")
+    b.add_argument(
+        "--naive", default="medium,high", help="levels to also run the no-outbox baseline"
+    )
     b.add_argument("--out", default="results/bench.json")
 
     k = add("killtest", cmd_killtest, "SIGKILL workers at random points and check the invariants")

@@ -199,18 +199,21 @@ LEVELS = {
             rate_429=0.02, rate_500=0.02, rate_timeout=0.01, rate_slow=0.02, rate_drop=0.01
         ),
         kill_every_s=4.0,
+        crash_span=3000,
     ),
     "medium": dict(
         faults=Faults(
             rate_429=0.05, rate_500=0.05, rate_timeout=0.02, rate_slow=0.05, rate_drop=0.02
         ),
         kill_every_s=2.0,
+        crash_span=1000,
     ),
     "high": dict(
         faults=Faults(
             rate_429=0.10, rate_500=0.10, rate_timeout=0.05, rate_slow=0.10, rate_drop=0.05
         ),
         kill_every_s=1.0,
+        crash_span=400,
     ),
 }
 for _lv in LEVELS.values():
@@ -262,10 +265,17 @@ def bench_run(
             )
         cmd = _worker_cmd(db, ["--limits", str(workdir / "limits.toml")])
         log = open(workdir / "workers.log", "ab")  # noqa: SIM115
-        procs = [_start(cmd, i, seed, log) for i in range(workers)]
+
+        # Two kinds of kill. The parent SIGKILLs a random worker at random times. And each
+        # worker gets a crash point picked by the seed (AGENTQUEUE_CRASH_AT), so kills also
+        # land in the narrow gaps between a call, a send and a commit.
+        def crash_at():
+            return rng.randint(1, cfg["crash_span"])
+
+        procs = [_start(cmd, i, seed, log, crash_at()) for i in range(workers)]
         t0 = time.time()
         next_kill = t0 + rng.expovariate(1 / cfg["kill_every_s"])
-        kills = 0
+        kills = self_kills = starts = 0
         try:
             while time.time() - t0 < deadline_s:
                 if st.all_terminal() and _pending(st) == 0:
@@ -275,11 +285,17 @@ def bench_run(
                     if procs[i].poll() is None:
                         procs[i].send_signal(signal.SIGKILL)
                         procs[i].wait(timeout=10)
+                        procs[i].killed_by_parent = True
                         kills += 1
                     next_kill = time.time() + rng.expovariate(1 / cfg["kill_every_s"])
                 for i, p in enumerate(procs):
                     if p.poll() is not None and not (st.all_terminal() and _pending(st) == 0):
-                        procs[i] = _start(cmd, i, seed + kills + 100, log)
+                        if p.returncode == -signal.SIGKILL and not getattr(
+                            p, "killed_by_parent", False
+                        ):
+                            self_kills += 1
+                        starts += 1
+                        procs[i] = _start(cmd, i, seed * 1000 + starts, log, crash_at())
                 time.sleep(0.02)
             wall = time.time() - t0
         finally:
@@ -313,7 +329,9 @@ def bench_run(
         "dead": sum(r["state"] == "dead" for r in rows),
         "not_finished": sum(r["state"] not in ("succeeded", "dead", "failed") for r in rows),
         "completion_rate": succeeded / n_jobs,
-        "kills": kills,
+        "kills": kills + self_kills,
+        "parent_kills": kills,
+        "crash_point_kills": self_kills,
         "requests_sent": len(calls),
         "provider_requests": snap["requests"],
         "provider_completions": snap["completions"],
@@ -321,6 +339,7 @@ def bench_run(
         "duplicate_effects": snap["naive_duplicates"] if naive else snap["duplicate_effects"],
         "missing_effects": 0 if naive else len(want_keys - set(fp.stats.effects)),
         "redeliveries": snap["redeliveries"],
+        "effects_applied": snap["naive_effects"] if naive else snap["effects"],
         "limit_violations": audit_calls(calls, lim),
         "p50_latency_s": _pct(lat, 50),
         "p95_latency_s": _pct(lat, 95),
@@ -331,12 +350,12 @@ def bench_run(
     }
 
 
-def _start(cmd, i, seed, log):
+def _start(cmd, i, seed, log, crash_at=None):
     return subprocess.Popen(
         [*cmd, "--seed", str(seed * 10 + i)],
         stdout=subprocess.DEVNULL,
         stderr=log,
-        env=_env(None),
+        env=_env(crash_at),
     )
 
 

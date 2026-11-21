@@ -96,10 +96,10 @@ def png(px) -> bytes:
 def main() -> None:
     px = canvas()
     rect(px, 0, 0, W, 12, ACCENT)
-    text(px, "gatedcrew", 80, 110, 14, FG)
-    text(px, "guardrails for long agent runs", 84, 260, 5, ACCENT)
-    text(px, "budgets, gates, separate evaluator", 84, 330, 5, MUTED)
-    text(px, "hash-chained audit log", 84, 390, 5, MUTED)
+    text(px, "agentqueue", 80, 110, 14, FG)
+    text(px, "crash-safe llm jobs in one sqlite file", 84, 260, 5, ACCENT)
+    text(px, "durable steps, outbox, dedupe keys", 84, 330, 5, MUTED)
+    text(px, "rate budgets, chaos benchmark", 84, 390, 5, MUTED)
     # A decorative bar trio. The heights are fixed shapes, not results.
     for i, color in enumerate(BARS):
         rect(px, 1110 + i * 45, 560 - (80 + i * 50), 1145 + i * 45, 560, color)

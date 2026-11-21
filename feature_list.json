@@ -1,0 +1,153 @@
+[
+  {
+    "id": "F01",
+    "area": "init",
+    "description": "Initializer: init.sh, memory files, MIT LICENSE, .env.example, secret scan hook",
+    "steps": [
+      "./init.sh",
+      "test -f LICENSE -a -f .env.example -a -f .pre-commit-config.yaml",
+      "gitleaks git -v ."
+    ],
+    "passes": false
+  },
+  {
+    "id": "F02",
+    "area": "store",
+    "description": "Injectable clock and the SQLite store in WAL mode, claims inside BEGIN IMMEDIATE",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_clock.py tests/test_store.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F03",
+    "area": "states",
+    "description": "Job state machine as an explicit table, every transition tested, a crash in each state",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_states.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F04",
+    "area": "steps",
+    "description": "Durable steps: ctx.step saves results, replay returns saved results and runs only the next step",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_steps.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F05",
+    "area": "idempotency",
+    "description": "Two submits with the same idempotency key create one job (Done means 5)",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_idempotency.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F06",
+    "area": "outbox",
+    "description": "Outbox entries commit with the step, the dispatcher sends them with dedupe key job:step:index",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_outbox.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F07",
+    "area": "ratelimit",
+    "description": "Token buckets for rpm, rpd and tpm from TOML, kept in the store, retry-after and x-ratelimit headers, request log audit (Done means 4)",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_ratelimit.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F08",
+    "area": "retry",
+    "description": "Retries by error class with full-jitter backoff, circuit breaker per provider, dead-letter table and requeue",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_retry.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F09",
+    "area": "fakeprovider",
+    "description": "Fake provider on 127.0.0.1 injecting 429, 500, timeouts, slow replies and dropped connections from a seed",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_fakeprovider.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F10",
+    "area": "kill",
+    "description": "SIGKILL the worker at random points in 200 runs: every job ends succeeded or dead, no finished step runs twice (Done means 2)",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_kill.py",
+      ".venv/bin/agentqueue killtest --runs 200 --out results/killtest.json"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F11",
+    "area": "bench",
+    "description": "Chaos benchmark: zero duplicate side effects, no limit breaks, completion, wasted calls, p50 and p95 latency and throughput at three fault levels over 5 seeds (Done means 3, 4, 6)",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_bench.py",
+      ".venv/bin/agentqueue readme --check"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F12",
+    "area": "cli",
+    "description": "Command with submit, work, dispatch, status, requeue, bench, killtest and readme",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_cli.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F13",
+    "area": "offline",
+    "description": "All tests pass offline, guarded by conftest (Done means 1)",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_network_guard.py",
+      "./init.sh"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F14",
+    "area": "readme",
+    "description": "README quality bar: sections in order, generated tables, CI badge, social preview, demo page, links checked",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_repo.py tests/test_readme.py",
+      ".venv/bin/python scripts/check_links.py"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F15",
+    "area": "studykit",
+    "description": "Study-later kit: WALKTHROUGH, INTERVIEW_QA with the interview points, DECISIONS",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_repo.py -k study"
+    ],
+    "passes": false
+  },
+  {
+    "id": "F16",
+    "area": "release",
+    "description": "Release check and hand-off: RELEASE_CHECK, HUMAN_STEPS, COWORK_PROMPT, CHANGELOG with the release SHA",
+    "steps": [
+      ".venv/bin/python -m pytest -q tests/test_repo.py -k release",
+      "git status --porcelain"
+    ],
+    "passes": false
+  }
+]
