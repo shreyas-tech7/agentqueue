@@ -18,7 +18,7 @@ Branch: `claude/build-agentqueue`
 3. Run the secret scan once more on a fresh clone: `gitleaks git -v .`
 4. Fill in the About box with the text in docs/GITHUB_ABOUT.md and add the topics in docs/topics.txt, if the coordinator could not.
 5. Upload `docs/social-preview.png` under Settings, General, Social preview.
-6. Make the repo public when you are ready. All history becomes public at that moment.
+6. Make the repo public. Done 2026-11-26: the repo is public.
 7. Turn on Pages from the `main` branch, folder `/docs`, so docs/index.html is the results page.
 8. Pin the repo or list it in your profile README.
 9. Publish to PyPI with trusted publishing, if you want the package public. The name `agentqueue` was free on 2026-11-21.

@@ -4,7 +4,7 @@
 
 **Status:** v0.1.0-rc1, a release candidate. Every number below comes from a local fake provider with injected faults, not from a real model. The human checks are not done yet.
 
-agentqueue runs LLM jobs that survive crashes, stay inside free-tier rate limits and never repeat a side effect. All of its state lives in one SQLite file. It needs only the Python standard library.
+agentqueue runs LLM jobs that survive crashes, stay inside free-tier rate limits and never apply a side effect twice, as long as the receiver checks the dedupe key. All of its state lives in one SQLite file. It needs only the Python standard library.
 
 ## The problem
 
@@ -54,7 +54,7 @@ Run on 2026-11-21 on Intel(R) Xeon(R) Processor @ 2.10GHz, 4 cores, Python 3.13.
 
 Each cell is the mean over the seeds, then a 95% t interval over the seeds in brackets, cut at 0 and at 100%. "Same on every seed" means every seed gave the same value, so the interval has no width. Duplicate effects count side effects the receiver applied twice: the same effect body under two different keys, which a key check cannot catch. Job latency runs from submit to finish, and all jobs are submitted at once at the start, so most of it is time spent in the queue behind the rate limit. Completion below 100% means a job used all its attempts under faults and kills and went dead, which is the designed end for that case. Limit breaks count every moment the request log broke a token bucket or a limit window, summed over all seeds. That audit is the check on the limit. The requests per minute column is the run's request count over its length, and a run shorter than a minute can average above the per-minute limit, because the bucket starts full: a full burst plus a minute's refill still fits inside the limit for any 60 second window.
 
-| Fault level | Completion rate | Wasted calls per run | Duplicate effects | p50 job latency | p95 job latency | Requests per min, run average | Limit breaks | Worker kills per run |
+| Fault level | Completion rate | Wasted calls per run | Duplicate effects | p50 job latency | p95 job latency | Requests per min, whole run (can top the limit on runs under a minute) | Limit breaks | Worker kills per run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | low | 100.0% (same on every seed) | 3.0 [0.7, 5.3] | 0 (same on every seed) | 9.2 s [8.6 s, 9.7 s] | 12.0 s [11.8 s, 12.3 s] | 956 [947, 964] | 0 | 10.2 [6.5, 13.9] |
 | medium | 100.0% (same on every seed) | 3.6 [1.5, 5.7] | 0 (same on every seed) | 9.8 s [9.5 s, 10.2 s] | 13.3 s [12.6 s, 14.0 s] | 870 [781, 958] | 0 | 32.6 [29.0, 36.2] |

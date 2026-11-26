@@ -6,11 +6,11 @@
 - Kill test: 200 SIGKILL runs in tests/test_kill.py, a kill in every run.
 - Chaos benchmark with a no-outbox baseline, run on the final code. README and results page generated from results/.
 - Code review and outside check, every must-fix item fixed with a test. See docs/RELEASE_CHECK.md.
-- Docs: PLAN, WALKTHROUGH, INTERVIEW_QA, TOOLING, ENVIRONMENT, DEMO, RELEASE_CHECK, HUMAN_STEPS, COWORK_PROMPT.
+- Docs: PLAN, WALKTHROUGH, INTERVIEW_QA, ENVIRONMENT, DEMO, RELEASE_CHECK, HUMAN_STEPS.
 - Release commit and the commit that writes its SHA.
 
 ## Next
-- Human steps in docs/HUMAN_STEPS.md: PR, merge, tag v0.1.0-rc1, About box, topics, public repo when ready.
+- Human steps in docs/HUMAN_STEPS.md: PR, merge, tag v0.1.0-rc1, About box, topics, public repo (done 2026-11-26).
 
 ## Open blockers
 See BLOCKERS.md: no gh, PR or tags from this machine, no provider key.
