@@ -3,7 +3,6 @@
 One line per choice: what, the options, the reason.
 
 - Name: `agentqueue`. PyPI and npm both answered 404 on 2026-11-21. A web search found only a small Go package (ka2n/agentqueue) and an unrelated docs site, nothing well known. So the brief's first pick stays, and no rename step is needed.
-- Workdir: the repo was already cloned at /home/user/agentqueue by the session, so the build used that folder instead of ~/work/agentqueue. Same remotes.
 - Job states: `failed` is terminal for permanent errors (400 class, unknown job kind, duplicate step name). `dead` is for retryable errors that ran out of attempts and for workers that died with no attempts left. Options: one terminal error state, or a transient failed state. Two terminal states tell an operator whether a retry could ever help.
 - `waiting` covers both retry backoff and rate waits. A rate wait gives the attempt back, because the job did nothing wrong.
 - Rate state lives in SQLite (tables `buckets`, `providers`, `calls`), not in memory. Options: in-memory buckets per worker. A restarted worker with in-memory buckets starts full and can break the limit. A test proves it.

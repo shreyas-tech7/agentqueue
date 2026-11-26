@@ -25,7 +25,6 @@ REQUIRED = [
     "docs/WALKTHROUGH.md",
     "docs/INTERVIEW_QA.md",
     "docs/HUMAN_STEPS.md",
-    "docs/handoff/COWORK_PROMPT.md",
     "docs/build/BUILD_PROMPT.md",
     "DECISIONS.md",
     ".env.example",
@@ -69,7 +68,6 @@ def prose_files():
     files += [
         ROOT / "CONTRIBUTING.md",
         ROOT / "CHANGELOG.md",
-        ROOT / "docs/handoff/COWORK_PROMPT.md",
     ]
     return files
 
@@ -133,6 +131,3 @@ def test_release_docs():
         assert needle in human
     assert re.search(r"[0-9a-f]{40}", (ROOT / "CHANGELOG.md").read_text())
     assert re.search(r"[0-9a-f]{40}", human)
-    cowork = (ROOT / "docs/handoff/COWORK_PROMPT.md").read_text()
-    for needle in ("Do not make the repo public", "Do not ask", "resume"):
-        assert needle.lower() in cowork.lower()

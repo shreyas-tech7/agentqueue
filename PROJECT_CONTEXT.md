@@ -1,7 +1,7 @@
 # Project context: agentqueue
 
 ## What it is
-A runner for LLM jobs that survive crashes, stay inside free-tier rate limits and never repeat a side effect. All state lives in one SQLite file in WAL mode. Standard library only.
+A runner for LLM jobs that survive crashes, stay inside free-tier rate limits and never apply a side effect twice, as long as the receiver checks the dedupe key. All state lives in one SQLite file in WAL mode. Standard library only.
 
 ## Status
 v0.1.0-rc1 release candidate on branch `claude/build-agentqueue`. All features in `feature_list.json` pass. The human steps are in `docs/HUMAN_STEPS.md`.

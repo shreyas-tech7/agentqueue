@@ -59,7 +59,7 @@ HEADERS = [
     "Duplicate effects",
     "p50 job latency",
     "p95 job latency",
-    "Requests per min, run average",
+    "Requests per min, whole run (can top the limit on runs under a minute)",
     "Limit breaks",
     "Worker kills per run",
 ]

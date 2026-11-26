@@ -4,7 +4,7 @@
 
 **Status:** v0.1.0-rc1, a release candidate. Every number below comes from a local fake provider with injected faults, not from a real model. The human checks are not done yet.
 
-agentqueue runs LLM jobs that survive crashes, stay inside free-tier rate limits and never repeat a side effect. All of its state lives in one SQLite file. It needs only the Python standard library.
+agentqueue runs LLM jobs that survive crashes, stay inside free-tier rate limits and never apply a side effect twice, as long as the receiver checks the dedupe key. All of its state lives in one SQLite file. It needs only the Python standard library.
 
 ## The problem
 

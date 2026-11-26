@@ -2,7 +2,7 @@
 
 If this session stops, the next one starts here.
 
-- Branch: `claude/build-agentqueue` on origin (shreyas-tech7/agentqueue) and on the backup remote.
+- Branch: `claude/build-agentqueue` on origin (shreyas-tech7/agentqueue).
 - Read PROGRESS.md for done and next.
 - Commands:
   - `./init.sh` (all tests offline, about 1 minute)
